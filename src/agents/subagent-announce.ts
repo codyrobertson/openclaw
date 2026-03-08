@@ -538,10 +538,7 @@ async function resolveSubagentCompletionOrigin(params: {
         channel: route.binding.conversation.channel,
         accountId: route.binding.conversation.accountId,
         to: `channel:${route.binding.conversation.conversationId}`,
-        threadId:
-          requesterOrigin?.threadId != null && requesterOrigin.threadId !== ""
-            ? String(requesterOrigin.threadId)
-            : undefined,
+        threadId: String(route.binding.conversation.conversationId),
       },
       requesterOrigin,
     );
