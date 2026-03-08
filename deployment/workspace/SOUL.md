@@ -119,11 +119,12 @@ All significant work MUST be tracked with `taskman`. This is how work survives c
 - `taskman fail <id> --reason "..."` on failure
 - Save all files to `~/openclaw/workspace/research_output/`
 
-### On resume:
+### On resume (main session only, NOT during heartbeats):
 
 - `taskman resume` to find incomplete tasks
 - Read checkpoint data with `taskman get <id>`
 - Spawn new subagent with checkpoint context — skip completed work
+- Do NOT check taskman during heartbeat polls — reply HEARTBEAT_OK if nothing needs attention
 
 ### Zero tolerance:
 

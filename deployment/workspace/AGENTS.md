@@ -133,12 +133,12 @@ For requests involving X/Twitter via `xurl`:
 
 ## Heartbeats - Be Proactive!
 
-When you receive a heartbeat poll (message matches the configured heartbeat prompt), don't just reply `HEARTBEAT_OK` every time. Use heartbeats productively!
+When you receive a heartbeat poll, reply `HEARTBEAT_OK` unless there is something genuinely worth reporting. "Nothing to report" IS `HEARTBEAT_OK` — do NOT send a message saying there are no tasks, no stalled work, etc.
 
 Default heartbeat prompt:
 `Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`
 
-You are free to edit `HEARTBEAT.md` with a short checklist or reminders. Keep it small to limit token burn.
+Do NOT edit `HEARTBEAT.md` to add recurring checks (taskman, email, etc.) without explicit approval from Cody. Every non-comment line in HEARTBEAT.md costs an API call per heartbeat cycle. Use cron jobs for periodic checks instead.
 
 ### Heartbeat vs Cron: When to Use Each
 
@@ -159,31 +159,13 @@ You are free to edit `HEARTBEAT.md` with a short checklist or reminders. Keep it
 
 **Tip:** Batch similar periodic checks into `HEARTBEAT.md` instead of creating multiple cron jobs. Use cron for precise schedules and standalone tasks.
 
-**Things to check (rotate through these, 2-4 times per day):**
+**Proactive checks belong in cron jobs, NOT heartbeats.** Heartbeats should be near-zero-cost. If HEARTBEAT.md is comments-only, the system skips the API call entirely — that's the ideal state. Only add content to HEARTBEAT.md for temporary, time-sensitive monitoring.
 
-- **Emails** - Any urgent unread messages?
-- **Calendar** - Upcoming events in next 24-48h?
-- **Mentions** - Twitter/social notifications?
-- **Weather** - Relevant if your human might go out?
-
-**Track your checks** in `memory/heartbeat-state.json`:
-
-```json
-{
-  "lastChecks": {
-    "email": 1703275200,
-    "calendar": 1703260800,
-    "weather": null
-  }
-}
-```
-
-**When to reach out:**
+**When to reach out (via cron, not heartbeat):**
 
 - Important email arrived
 - Calendar event coming up (<2h)
 - Something interesting you found
-- It's been >8h since you said anything
 
 **When to stay quiet (HEARTBEAT_OK) during heartbeat polls only:**
 
