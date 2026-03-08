@@ -5,7 +5,7 @@ description: Maricopa County Recorder document search — find deeds, liens, mor
 
 # Maricopa County Recorder
 
-Search recorded documents (deeds, mortgages, liens, etc.) from the Maricopa County Recorder's Office. Coverage: 1871-present.
+Search recorded documents (deeds, mortgages, liens, etc.) from the Maricopa County Recorder's Office. Coverage: 1947-present (1871-1946 via separate tab on site).
 
 ## When to Use
 
@@ -38,25 +38,25 @@ python3 skills/re-recorder/scripts/recorder.py name "Smith" "John"
 # With middle initial
 python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --middle "A"
 
-# With date range
+# With date range (YYYY-MM-DD format)
 python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --from 2020-01-01 --to 2026-03-08
 
-# Filter by document type
-python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --doctype DEED
+# Filter by document type (use full name from site dropdown)
+python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --doctype "DEED/USE WITH ANY GENERAL DEED TYPE"
 ```
 
 ### Search by Business Name
 
 ```bash
 python3 skills/re-recorder/scripts/recorder.py business "ABC Holdings LLC"
-python3 skills/re-recorder/scripts/recorder.py business "First American Title" --doctype DEEDTR
+python3 skills/re-recorder/scripts/recorder.py business "First American Title"
 ```
 
 ### Search by Recording Number
 
 ```bash
-# Year + sequence number
-python3 skills/re-recorder/scripts/recorder.py recording "2024" "0715342"
+# Full recording number (e.g. 20240715342)
+python3 skills/re-recorder/scripts/recorder.py recording "20240715342"
 ```
 
 ### List Document Type Codes
@@ -71,27 +71,40 @@ python3 skills/re-recorder/scripts/recorder.py types
 python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --format json
 ```
 
-## Common Document Type Codes
+## Result Fields
 
-| Code      | Description              |
-| --------- | ------------------------ |
-| `DEED`    | Deed                     |
-| `DEEDTR`  | Deed of Trust            |
-| `RELDTR`  | Release of Deed of Trust |
-| `MTG`     | Mortgage                 |
-| `RELMTG`  | Release of Mortgage      |
-| `LIEN`    | Lien                     |
-| `RELLIEN` | Release of Lien          |
-| `MECHLN`  | Mechanic's Lien          |
-| `JUDGMT`  | Judgment                 |
-| `AFFDT`   | Affidavit                |
-| `QUIT`    | Quit Claim Deed          |
-| `WARR`    | Warranty Deed            |
-| `SPWARR`  | Special Warranty Deed    |
-| `TRUSTEE` | Trustee's Deed           |
-| `CCREST`  | CC&Rs                    |
-| `EASMNT`  | Easement                 |
-| `POA`     | Power of Attorney        |
+| Field              | Description                 |
+| ------------------ | --------------------------- |
+| `name`             | Party name on the document  |
+| `recording_number` | Full recording number       |
+| `recording_date`   | Date recorded (MM/DD/YYYY)  |
+| `doc_type`         | Document type code          |
+| `docket_book`      | Docket/book number (if any) |
+| `page_map`         | Page/map number (if any)    |
+
+## Common Document Types (as shown in results)
+
+| Code         | Description              |
+| ------------ | ------------------------ |
+| `DEED`       | General Deed             |
+| `DEED TRST`  | Deed of Trust            |
+| `REL D/T`    | Release of Deed of Trust |
+| `WAR DEED`   | Warranty Deed            |
+| `SPEC/W D`   | Special Warranty Deed    |
+| `Q/CL DEED`  | Quit Claim Deed          |
+| `MORTGAGE`   | Mortgage                 |
+| `REL MTG`    | Release of Mortgage      |
+| `JUDGMENT`   | Judgment                 |
+| `ASSIGNMNT`  | Assignment               |
+| `AFFIDAVIT`  | Affidavit                |
+| `LIS PEND`   | Lis Pendens              |
+| `BENE DEED`  | Beneficiary Deed         |
+| `SUB TRSTE`  | Substitution of Trustee  |
+| `FIN STATE`  | Financing Statement      |
+| `LIEN`       | Lien                     |
+| `FED TAX LN` | Federal Tax Lien         |
+| `MECH LIEN`  | Mechanic's Lien          |
+| `NOTICE`     | Notice                   |
 
 ## Workflow: Title Chain
 
@@ -100,7 +113,7 @@ python3 skills/re-recorder/scripts/recorder.py name "Smith" "John" --format json
 python3 skills/re-assessor/scripts/assessor.py search "4610 E Flower St"
 
 # 2. Get current owner
-python3 skills/re-assessor/scripts/assessor.py owner 163-32-037
+python3 skills/re-assessor/scripts/assessor.py parcel 127-03-059
 
 # 3. Search recorder for all deeds on that owner
 python3 skills/re-recorder/scripts/recorder.py name "OwnerLastName" "OwnerFirstName" --doctype DEED
@@ -109,24 +122,25 @@ python3 skills/re-recorder/scripts/recorder.py name "OwnerLastName" "OwnerFirstN
 python3 skills/re-recorder/scripts/recorder.py name "OwnerLastName" "OwnerFirstName" --doctype LIEN
 
 # 5. Check for deeds of trust (mortgages)
-python3 skills/re-recorder/scripts/recorder.py name "OwnerLastName" "OwnerFirstName" --doctype DEEDTR
+python3 skills/re-recorder/scripts/recorder.py name "OwnerLastName" "OwnerFirstName" --doctype "DEED OF TRUST"
 ```
 
 ## Data Source
 
 Website: `https://legacy.recorder.maricopa.gov/recdocdata/`
-Coverage: June 1, 1871 through present
-Max results: 500 per search
+Coverage: 1947-present (default), 1871-1946 (separate tab on site)
+Results: 20 per page (paginated via "Page Down" on site)
 
 ## Dependencies
 
-- Works with or without scrapling (falls back to urllib)
+- Python 3 with standard library only (urllib, re)
+- Optional: `certifi` for SSL cert resolution on Homebrew Python
 - No API token required (public website)
 
 ## Rules
 
 - Use `--format json` when parsing output programmatically.
-- Max 500 results per search. Use date ranges to narrow.
+- Use date ranges to narrow results for common names.
 - Combine with `re-assessor` skill for full property research.
 - For title searches: search by both owner names AND property-related parties.
 - Document types can be combined with name/date filters.
