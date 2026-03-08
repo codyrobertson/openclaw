@@ -1,58 +1,33 @@
 #!/usr/bin/env python3
 """
-Maricopa County Assessor API client.
-Wraps the public REST API at mcassessor.maricopa.gov.
+Maricopa County Assessor property lookup.
+Scrapes the public website at mcassessor.maricopa.gov.
 
-Auth: Requires AUTHORIZATION header with API token.
-      Set env var MC_ASSESSOR_TOKEN or pass --token.
+The REST API documented in their PDF is Cloudflare-protected and requires
+browser-level cookies. This script scrapes the server-rendered HTML pages
+which work with simple HTTP requests.
 
 Usage:
   # Search properties by address, owner, or APN
   python3 assessor.py search "4610 E Flower St"
+  python3 assessor.py search "Smith John"
+  python3 assessor.py search "127-03-059"
 
-  # Get full parcel details by APN
-  python3 assessor.py parcel 163-32-037
+  # Get parcel details by APN (strips dashes automatically)
+  python3 assessor.py parcel 127-03-059
 
-  # Get property info
-  python3 assessor.py propertyinfo 163-32-037
-
-  # Get property address
-  python3 assessor.py address 163-32-037
-
-  # Get valuations (5 year history)
-  python3 assessor.py valuations 163-32-037
-
-  # Get residential details
-  python3 assessor.py residential 163-32-037
-
-  # Get owner details
-  python3 assessor.py owner 163-32-037
-
-  # Search subdivisions
-  python3 assessor.py subdivisions "Arcadia"
-
-  # Search rentals
-  python3 assessor.py rentals "85018"
-
-  # Get MCR data
-  python3 assessor.py mcr 12345
-
-  # Section/Township/Range lookup
-  python3 assessor.py str 1-1N-3E
-
-  # Get parcel maps
-  python3 assessor.py maps 163-32-037
-
-  # Full property report (all endpoints combined)
-  python3 assessor.py report 163-32-037
+  # Export search results as CSV
+  python3 assessor.py export "85018"
 """
 
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
 import urllib.parse
+
 
 def _setup_ssl():
     """Ensure SSL cert bundle is found on macOS (Homebrew Python often missing default)."""
@@ -70,138 +45,143 @@ _setup_ssl()
 
 BASE_URL = "https://mcassessor.maricopa.gov"
 
-def get_token():
-    token = os.environ.get("MC_ASSESSOR_TOKEN", "")
-    return token
 
-def api_get(path, token=None):
-    """Make authenticated GET request to the Assessor API."""
+def _fetch_html(path):
+    """Fetch an HTML page from the assessor website."""
     url = f"{BASE_URL}{path}"
-    tok = token or get_token()
-    headers = {"User-Agent": ""}
-    if tok:
-        headers["AUTHORIZATION"] = tok
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read().decode("utf-8")
-            return json.loads(data)
+            return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
         print(f"HTTP {e.code}: {e.reason}", file=sys.stderr)
-        if body:
-            print(body, file=sys.stderr)
         return None
     except urllib.error.URLError as e:
         print(f"Connection error: {e.reason}", file=sys.stderr)
         return None
 
-def search_property(query, page=None, token=None):
-    """Search all property types. Returns JSON with Real Property, BPP, MH, Rentals, Subdivisions."""
+
+def _strip_tags(html):
+    """Remove HTML tags from a string."""
+    return re.sub(r'<[^>]+>', '', html).strip()
+
+
+def _clean_apn(apn):
+    """Remove dashes, dots, spaces from APN."""
+    return re.sub(r'[\-\.\s]', '', apn)
+
+
+def search_property(query):
+    """Search for properties via the CSV export endpoint (no JS needed).
+    Returns list of dicts with APN, Owner, Address, City, Zip, Subdivision, MCR, STR, PropertyType."""
+    import csv
     encoded = urllib.parse.quote(query)
-    path = f"/search/property/?q={encoded}"
-    if page:
-        path += f"&page={page}"
-    return api_get(path, token)
+    csv_text = _fetch_html(f"/mcs/export/property/?q={encoded}")
+    if not csv_text:
+        return []
+    # First line is "Total Results: N", data starts at line 2 (header) + line 3+
+    lines = csv_text.strip().split('\n')
+    if len(lines) < 3:
+        return []
+    # Skip the "Total Results" line
+    reader = csv.DictReader(lines[1:])
+    results = []
+    for row in reader:
+        results.append({
+            "apn": row.get("APN", ""),
+            "owner": row.get("Owner", ""),
+            "address": f"{row.get('Address', '')}, {row.get('City', '')} {row.get('Zip', '')}".strip(", "),
+            "subdivision": row.get("Subdivison Name", row.get("Subdivision Name", "")),
+            "mcr": row.get("MCR", ""),
+            "str": row.get("S/T/R", ""),
+            "property_type": row.get("Property Type", ""),
+            "rental": row.get("Rental", ""),
+        })
+    return results
 
-def search_subdivisions(query, token=None):
-    """Search subdivision names."""
+
+def parcel_details(apn):
+    """Get detailed parcel information by APN."""
+    clean = _clean_apn(apn)
+    html = _fetch_html(f"/mcs/?q={clean}&mod=pd")
+    if not html:
+        return None
+    return _parse_parcel_detail(html)
+
+
+def _parse_parcel_detail(html):
+    """Parse the parcel detail page."""
+    result = {}
+
+    # Extract APN from heading
+    apn_match = re.search(r'<h3[^>]*>\s*(\d{3}-\d{2}-\d{3}[A-Z]?)\s*</h3>', html)
+    if apn_match:
+        result["apn"] = apn_match.group(1)
+
+    # Extract property type
+    type_match = re.search(r'<h3[^>]*>\s*(Residential|Commercial|Vacant|Agricultural|Exempt)\s+Parcel\s*</h3>', html, re.IGNORECASE)
+    if type_match:
+        result["property_type"] = type_match.group(1)
+
+    # Extract from the description paragraph: "located at <a>ADDRESS</a>...owner is OWNER...subdivision"
+    desc_match = re.search(r'located at.*?target="_blank">([^<]+)</a>', html, re.DOTALL)
+    if desc_match:
+        result["address"] = desc_match.group(1).strip()
+
+    owner_match = re.search(r'current owner is\s+(.*?)\.', html, re.DOTALL)
+    if owner_match:
+        result["owner"] = _strip_tags(owner_match.group(1)).strip()
+
+    # MCR link right after "MCR" text
+    mcr_match = re.search(r'MCR\s*<a[^>]*>(\d+)</a>', html)
+    if mcr_match:
+        result["mcr"] = mcr_match.group(1)
+
+    # Parse key-value pairs from the detail sections
+    # The site uses pairs like: <div class="label">Key</div> <div/a/link>Value</div/a>
+    # We look for short text-only divs followed by value divs
+    kv_fields = {
+        'MCR #': 'mcr',
+        'Description': 'description',
+        'Lot Size': 'lot_size',
+        'Lot #': 'lot_num',
+        'High School District': 'high_school_district',
+        'Elementary School District': 'elementary_school_district',
+        'Local Jurisdiction': 'local_jurisdiction',
+        'S/T/R': 'str',
+        'Market Area/Neighborhood': 'market_area',
+        'Mailing Address': 'mailing_address',
+        'Deed Number': 'deed_number',
+        'Last Deed Date': 'last_deed_date',
+        'Sale Date': 'sale_date',
+        'Sale Price': 'sale_price',
+    }
+    for field_label, field_key in kv_fields.items():
+        # Find the label, then grab the next sibling element's text content
+        pattern = re.escape(field_label) + r'</(?:div|span)>\s*<(?:div|span|a)[^>]*>\s*([^<]+)'
+        match = re.search(pattern, html)
+        if match:
+            value = match.group(1).strip()
+            if value and value not in ('', 'n/a'):
+                result[field_key] = value
+
+    # Check for "Parcel not found" error
+    if 'Parcel not found' in html:
+        return None
+
+    return result if result else None
+
+
+def export_search(query, search_type="property"):
+    """Export search results as CSV text."""
     encoded = urllib.parse.quote(query)
-    return api_get(f"/search/sub/?q={encoded}", token)
+    html = _fetch_html(f"/mcs/export/{search_type}/?q={encoded}")
+    return html
 
-def search_rentals(query, page=None, token=None):
-    """Search rental registrations."""
-    encoded = urllib.parse.quote(query)
-    path = f"/search/rental/?q={encoded}"
-    if page:
-        path += f"&page={page}"
-    return api_get(path, token)
-
-def parcel_details(apn, token=None):
-    """Get all available parcel data."""
-    return api_get(f"/parcel/{apn}", token)
-
-def property_info(apn, token=None):
-    """Get property-specific information."""
-    return api_get(f"/parcel/{apn}/propertyinfo", token)
-
-def property_address(apn, token=None):
-    """Get property address."""
-    return api_get(f"/parcel/{apn}/address", token)
-
-def valuation_details(apn, token=None):
-    """Get 5-year valuation history."""
-    return api_get(f"/parcel/{apn}/valuations", token)
-
-def residential_details(apn, token=None):
-    """Get residential parcel details."""
-    return api_get(f"/parcel/{apn}/residential-details", token)
-
-def owner_details(apn, token=None):
-    """Get owner information."""
-    return api_get(f"/parcel/{apn}/owner-details", token)
-
-def mcr_data(mcr, page=None, token=None):
-    """Get MCR data."""
-    path = f"/parcel/mcr/{mcr}"
-    if page:
-        path += f"?page={page}"
-    return api_get(path, token)
-
-def str_data(str_val, page=None, token=None):
-    """Get Section/Township/Range data."""
-    path = f"/parcel/str/{str_val}"
-    if page:
-        path += f"?page={page}"
-    return api_get(path, token)
-
-def parcel_maps(apn, token=None):
-    """Get parcel map file names."""
-    return api_get(f"/mapid/parcel/{apn}", token)
-
-def book_maps(book, map_num, token=None):
-    """Get book/map file names."""
-    return api_get(f"/mapid/bookmap/{book}/{map_num}", token)
-
-def mcr_maps(mcr, token=None):
-    """Get MCR map file names."""
-    return api_get(f"/mapid/mcr/{mcr}", token)
-
-def bpp_account(acct_type, acct, year=None, token=None):
-    """Get business personal property account details. type: c/m/l"""
-    path = f"/bpp/{acct_type}/{acct}"
-    if year:
-        path += f"/{year}"
-    return api_get(path, token)
-
-def mobile_home(acct, token=None):
-    """Get mobile home account details."""
-    return api_get(f"/mh/{acct}", token)
-
-def mobile_home_vin(vin, token=None):
-    """Get account number for a mobile home VIN."""
-    return api_get(f"/mh/vin/{vin}", token)
-
-def full_report(apn, token=None):
-    """Combine all parcel endpoints into a single report."""
-    report = {}
-    for name, fn in [
-        ("parcel", parcel_details),
-        ("propertyinfo", property_info),
-        ("address", property_address),
-        ("valuations", valuation_details),
-        ("residential", residential_details),
-        ("owner", owner_details),
-        ("maps", parcel_maps),
-    ]:
-        result = fn(apn, token)
-        if result is not None:
-            report[name] = result
-    return report
 
 def print_json(data):
     """Pretty-print JSON data."""
@@ -210,188 +190,93 @@ def print_json(data):
         return
     print(json.dumps(data, indent=2, default=str))
 
-def print_search_summary(data):
-    """Print a human-readable summary of property search results."""
-    if not data:
+
+def print_search_summary(results):
+    """Print a human-readable summary of search results."""
+    if not results:
         print("No results found.")
         return
 
-    # Handle different result structures
-    if isinstance(data, dict):
-        for key, val in data.items():
-            if isinstance(val, list) and val:
-                print(f"\n=== {key.upper()} ({len(val)} results) ===")
-                for i, item in enumerate(val[:25], 1):
-                    if isinstance(item, dict):
-                        apn = item.get("APN", item.get("apn", item.get("ParcelNumber", "")))
-                        addr = item.get("SitusAddress", item.get("Address", item.get("address", "")))
-                        owner = item.get("OwnerName", item.get("Owner", ""))
-                        print(f"  {i}. APN: {apn}")
-                        if addr:
-                            print(f"     Address: {addr}")
-                        if owner:
-                            print(f"     Owner: {owner}")
-            elif isinstance(val, (int, float)):
-                print(f"{key}: {val}")
-    elif isinstance(data, list):
-        for i, item in enumerate(data[:25], 1):
-            if isinstance(item, dict):
-                print(f"  {i}. {json.dumps(item, default=str)}")
+    print(f"\n{'=' * 70}")
+    print(f"  PROPERTY SEARCH — {len(results)} found")
+    print(f"{'=' * 70}\n")
 
-def print_report_summary(report):
-    """Print a human-readable property report."""
-    if not report:
-        print("No data found.")
+    for i, item in enumerate(results, 1):
+        apn = item.get("apn", "")
+        owner = item.get("owner", "")
+        addr = item.get("address", "")
+        ptype = item.get("property_type", "")
+        print(f"  {i}. APN: {apn}")
+        if addr:
+            print(f"     Address: {addr}")
+        if owner:
+            print(f"     Owner: {owner}")
+        if ptype:
+            print(f"     Type: {ptype}")
+        print()
+
+
+def print_parcel_summary(data):
+    """Print a human-readable parcel detail summary."""
+    if not data:
+        print("Parcel not found.")
         return
 
-    addr = report.get("address", {})
-    owner = report.get("owner", {})
-    prop = report.get("propertyinfo", {})
-    vals = report.get("valuations", {})
-    res = report.get("residential", {})
+    print(f"\n{'=' * 60}")
+    print(f"  PARCEL DETAIL — {data.get('apn', 'Unknown')}")
+    print(f"{'=' * 60}\n")
 
-    print("=" * 60)
-    print("  PROPERTY REPORT")
-    print("=" * 60)
-
-    if isinstance(addr, dict):
-        parts = [addr.get("HouseNumber", ""), addr.get("Direction", ""),
-                 addr.get("StreetName", ""), addr.get("Suffix", "")]
-        street = " ".join(p for p in parts if p)
-        city = addr.get("CityName", "")
-        zip_code = addr.get("Zip", "")
-        if street:
-            print(f"\n  Address: {street}")
-        if city or zip_code:
-            print(f"           {city}, AZ {zip_code}")
-
-    if isinstance(owner, dict):
-        name = owner.get("OwnerName", owner.get("Name", ""))
-        if isinstance(owner, list) and owner:
-            name = owner[0].get("OwnerName", owner[0].get("Name", ""))
-        if name:
-            print(f"  Owner: {name}")
-    elif isinstance(owner, list) and owner:
-        for o in owner:
-            name = o.get("OwnerName", o.get("Name", ""))
-            if name:
-                print(f"  Owner: {name}")
-
-    if isinstance(prop, dict):
-        for key in ["PropertyType", "LegalClass", "YearBuilt", "LivingArea",
-                     "LotSizeSqFt", "LotSizeAcres", "Bedrooms", "Bathrooms",
-                     "Pool", "Garage", "Construction", "Roofing"]:
-            val = prop.get(key)
-            if val:
-                print(f"  {key}: {val}")
-
-    if isinstance(res, dict):
-        for key in ["YearBuilt", "LivingArea", "Bedrooms", "Bathrooms",
-                     "Stories", "Pool", "GarageType", "Construction", "Quality"]:
-            val = res.get(key)
-            if val and key not in (prop if isinstance(prop, dict) else {}):
-                print(f"  {key}: {val}")
-
-    if isinstance(vals, (dict, list)):
-        val_list = vals if isinstance(vals, list) else vals.get("Valuations", vals.get("valuations", [vals]))
-        if isinstance(val_list, list) and val_list:
-            print(f"\n  --- Valuations (Last {len(val_list)} Years) ---")
-            for v in val_list:
-                if isinstance(v, dict):
-                    year = v.get("TaxYear", v.get("Year", ""))
-                    fcv = v.get("FullCashValue", v.get("FCV", ""))
-                    lpv = v.get("LimitedValue", v.get("LPV", ""))
-                    print(f"    {year}: FCV ${fcv:,}" if isinstance(fcv, (int, float)) else f"    {year}: FCV {fcv}", end="")
-                    if lpv:
-                        print(f"  LPV ${lpv:,}" if isinstance(lpv, (int, float)) else f"  LPV {lpv}")
-                    else:
-                        print()
-
-    maps_data = report.get("maps")
-    if maps_data:
-        print(f"\n  Maps: {json.dumps(maps_data, default=str)}")
-
+    for key, value in data.items():
+        label = key.replace('_', ' ').title()
+        print(f"  {label}: {value}")
     print()
+
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Maricopa County Assessor API client")
-    parser.add_argument("command", choices=[
-        "search", "subdivisions", "rentals",
-        "parcel", "propertyinfo", "address", "valuations",
-        "residential", "owner", "mcr", "str", "maps",
-        "bookmaps", "mcrmaps", "bpp", "mh", "mhvin",
-        "report"
-    ])
-    parser.add_argument("query", help="Search query, APN, MCR, STR, etc.")
-    parser.add_argument("--page", type=int, help="Page number for paginated results")
-    parser.add_argument("--token", help="API token (or set MC_ASSESSOR_TOKEN env var)")
-    parser.add_argument("--format", choices=["json", "summary"], default="summary",
-                        help="Output format (default: summary)")
-    parser.add_argument("--book", help="Book number (for bookmaps)")
-    parser.add_argument("--type", dest="bpp_type", choices=["c", "m", "l"],
-                        help="BPP account type: c=commercial, m=multiple, l=lessor")
-    parser.add_argument("--year", help="Tax year (for BPP)")
+    parser = argparse.ArgumentParser(description="Maricopa County Assessor property lookup")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Search
+    search_p = subparsers.add_parser("search", help="Search by address, owner, or APN")
+    search_p.add_argument("query", help="Search query")
+    search_p.add_argument("--format", choices=["json", "summary"], default="summary")
+
+    # Parcel detail
+    parcel_p = subparsers.add_parser("parcel", help="Get parcel details by APN")
+    parcel_p.add_argument("apn", help="Assessor Parcel Number (e.g. 127-03-059)")
+    parcel_p.add_argument("--format", choices=["json", "summary"], default="summary")
+
+    # Export
+    export_p = subparsers.add_parser("export", help="Export search results as CSV")
+    export_p.add_argument("query", help="Search query")
+    export_p.add_argument("--type", dest="search_type", default="property",
+                          choices=["property", "bpp", "mh", "rental", "sub"],
+                          help="Search type to export")
 
     args = parser.parse_args()
-    token = args.token
 
-    cmd = args.command
-    q = args.query
+    if args.command == "search":
+        results = search_property(args.query)
+        if args.format == "json":
+            print_json(results)
+        else:
+            print_search_summary(results)
 
-    if cmd == "search":
-        data = search_property(q, args.page, token)
-    elif cmd == "subdivisions":
-        data = search_subdivisions(q, token)
-    elif cmd == "rentals":
-        data = search_rentals(q, args.page, token)
-    elif cmd == "parcel":
-        data = parcel_details(q, token)
-    elif cmd == "propertyinfo":
-        data = property_info(q, token)
-    elif cmd == "address":
-        data = property_address(q, token)
-    elif cmd == "valuations":
-        data = valuation_details(q, token)
-    elif cmd == "residential":
-        data = residential_details(q, token)
-    elif cmd == "owner":
-        data = owner_details(q, token)
-    elif cmd == "mcr":
-        data = mcr_data(q, args.page, token)
-    elif cmd == "str":
-        data = str_data(q, args.page, token)
-    elif cmd == "maps":
-        data = parcel_maps(q, token)
-    elif cmd == "bookmaps":
-        if not args.book:
-            print("--book required for bookmaps", file=sys.stderr)
-            sys.exit(1)
-        data = book_maps(args.book, q, token)
-    elif cmd == "mcrmaps":
-        data = mcr_maps(q, token)
-    elif cmd == "bpp":
-        if not args.bpp_type:
-            print("--type required for bpp (c/m/l)", file=sys.stderr)
-            sys.exit(1)
-        data = bpp_account(args.bpp_type, q, args.year, token)
-    elif cmd == "mh":
-        data = mobile_home(q, token)
-    elif cmd == "mhvin":
-        data = mobile_home_vin(q, token)
-    elif cmd == "report":
-        data = full_report(q, token)
-        if args.format == "summary":
-            print_report_summary(data)
-            return
-    else:
-        print(f"Unknown command: {cmd}", file=sys.stderr)
-        sys.exit(1)
+    elif args.command == "parcel":
+        data = parcel_details(args.apn)
+        if args.format == "json":
+            print_json(data)
+        else:
+            print_parcel_summary(data)
 
-    if args.format == "json" or cmd not in ("search", "report"):
-        print_json(data)
-    else:
-        print_search_summary(data)
+    elif args.command == "export":
+        csv_data = export_search(args.query, args.search_type)
+        if csv_data:
+            print(csv_data)
+        else:
+            print("Export failed.", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

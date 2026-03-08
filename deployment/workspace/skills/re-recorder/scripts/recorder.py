@@ -7,17 +7,17 @@ Usage:
   # Search by person name
   python3 recorder.py name "Smith" "John"
 
-  # Search by recording number (year + sequence)
-  python3 recorder.py recording "2024" "0715342"
+  # Search by recording number
+  python3 recorder.py recording "20240715342"
 
   # Search by business name
   python3 recorder.py business "ABC LLC"
 
   # Search by name with date range
-  python3 recorder.py name "Robertson" "Cody" --from 2020-01-01 --to 2026-03-08
+  python3 recorder.py name "Smith" "John" --from 2020-01-01 --to 2026-03-08
 
   # Search by name with document type filter
-  python3 recorder.py name "Smith" "John" --doctype DEED
+  python3 recorder.py name "Smith" "John" --doctype "DEED"
 
   # Output as JSON
   python3 recorder.py name "Smith" "John" --format json
@@ -34,34 +34,36 @@ from datetime import datetime
 
 BASE_URL = "https://legacy.recorder.maricopa.gov/recdocdata"
 
-# Common document type codes
+# Common document type codes (display names from the site's dropdown)
 DOC_TYPES = {
-    "DEED": "Deed",
-    "DEEDTR": "Deed of Trust",
-    "RELDTR": "Release of Deed of Trust",
-    "SUBDTR": "Substitution of Trustee - Deed of Trust",
-    "MTG": "Mortgage",
-    "RELMTG": "Release of Mortgage",
-    "ASSIGN": "Assignment",
-    "LIEN": "Lien",
-    "RELLIEN": "Release of Lien",
-    "MECHLN": "Mechanic's Lien",
-    "JUDGMT": "Judgment",
-    "AFFDT": "Affidavit",
-    "AGREE": "Agreement",
-    "EASMNT": "Easement",
-    "DECREE": "Decree",
-    "NOTICE": "Notice",
-    "POA": "Power of Attorney",
-    "QUIT": "Quit Claim Deed",
-    "WARR": "Warranty Deed",
-    "SPWARR": "Special Warranty Deed",
-    "TRUSTEE": "Trustee's Deed",
-    "WILL": "Will",
-    "CCREST": "Covenants, Conditions & Restrictions",
-    "PLAT": "Plat",
-    "MAP": "Map",
+    "DEED": "DEED/USE WITH ANY GENERAL DEED TYPE",
+    "DEED OF TRUST": "DEED OF TRUST",
+    "MORTGAGE": "MORTGAGE",
+    "WAR DEED": "WARRANTY DEED",
+    "SPWARR": "SPECIAL WARRANTY DEED",
+    "Q/CL DEED": "QUIT CLAIM DEED",
+    "TRUSTEES DEED": "TRUSTEES DEED OF ANY KIND",
+    "REL D/TR": "DEED OF RELEASE & FULL RECONVEYANCE OF D/TR",
+    "REL MTG": "RELEASE OF MORTGAGE",
+    "JUDGMENT": "JUDGMENT-GENERAL TYPES INCLUDNG CIVIL",
+    "ASSIGNMNT": "ASSIGNMNT OF MTG/DEED OF TRUST OR ASSIGNMNTS",
+    "AFFIDAVIT": "AFFIDAVIT/USE WITH ANY \"GENERAL\" TYPE AFFIDAVIT",
+    "AGREEMENT": "AGREEMENT/USE WITH ANY GENERAL AGREEMENT",
+    "EASEMENT": "EASEMENT - DEDICATION OF RIGHT OF WAY",
+    "LIS PEND": "LIS PENDENS",
+    "POWER ATT": "POWER OF ATTORNEY",
+    "LIEN": "LIENS-GOVT/NON-GOVT & GENERAL LIENS",
+    "FED TAX LN": "FEDERAL TAX LIEN",
+    "STATE TAX": "STATE TAX LIEN",
+    "MECH LIEN": "MATERIAL MANS MECH LN",
+    "NOTICE": "NOTICE",
+    "PLAT MAP": "PLAT MAP",
+    "BEN DEED": "BENEFICIARY DEED",
+    "PROP REST": "PROPERTY RESTRICTIONS FOR CONDO/SUBDIV",
+    "SUB TRUST": "SUBSTITUTION OF TRUSTEE ON DEED OF TRUST",
+    "MISC RCRD": "MISCELLANEOUS RECORDING",
 }
+
 
 def _setup_ssl():
     """Ensure SSL cert bundle is found on macOS (Homebrew Python often missing default)."""
@@ -72,67 +74,82 @@ def _setup_ssl():
         ca = "/etc/ssl/cert.pem"
     os.environ.setdefault("SSL_CERT_FILE", ca)
     os.environ.setdefault("CURL_CA_BUNDLE", ca)
-    # Also patch urllib default context for this process
     import ssl
     if not os.path.exists(ssl.get_default_verify_paths().cafile or ""):
         ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=ca)
 
 _setup_ssl()
 
-try:
-    from scrapling import Fetcher
-    HAS_SCRAPLING = True
-except ImportError:
-    HAS_SCRAPLING = False
+
+def _format_date(date_str):
+    """Convert YYYY-MM-DD to M/D/YYYY as the site expects."""
+    if not date_str:
+        return ""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return f"{dt.month}/{dt.day}/{dt.year}"
+    except ValueError:
+        return date_str
 
 
 def search_by_name(last_name, first_name="", middle="", date_from=None, date_to=None,
-                   doc_type="", max_results=500):
+                   doc_type=""):
     """Search recorded documents by personal name."""
     params = {
-        "lname": last_name,
-        "fname": first_name,
-        "mname": middle,
-        "doctypegroup": doc_type,
-        "begdate": date_from or "",
-        "enddate": date_to or "",
-        "maxresults": str(max_results),
+        "ln1": last_name,
+        "fn1": first_name,
+        "mn1": middle,
+        "ln2": "",
+        "fn2": "",
+        "mn2": "",
+        "biz1": "",
+        "biz2": "",
+        "doc1": doc_type,
+        "doc2": "",
+        "doc3": "",
+        "doc4": "",
+        "doc5": "",
+        "begdt": _format_date(date_from) or "1/1/1947",
+        "enddt": _format_date(date_to) or datetime.now().strftime("%-m/%-d/%Y"),
     }
     return _fetch_results(params)
 
 
-def search_by_business(name, date_from=None, date_to=None, doc_type="", max_results=500):
+def search_by_business(name, date_from=None, date_to=None, doc_type=""):
     """Search recorded documents by business name."""
     params = {
-        "busname": name,
-        "doctypegroup": doc_type,
-        "begdate": date_from or "",
-        "enddate": date_to or "",
-        "maxresults": str(max_results),
+        "biz1": name,
+        "biz2": "",
+        "ln1": "",
+        "fn1": "",
+        "mn1": "",
+        "ln2": "",
+        "fn2": "",
+        "mn2": "",
+        "doc1": doc_type,
+        "doc2": "",
+        "doc3": "",
+        "doc4": "",
+        "doc5": "",
+        "begdt": _format_date(date_from) or "1/1/1947",
+        "enddt": _format_date(date_to) or datetime.now().strftime("%-m/%-d/%Y"),
     }
     return _fetch_results(params)
 
 
-def search_by_recording(year, number, suffix=""):
-    """Search by recording number."""
-    params = {
-        "recyear": year,
-        "recnumber": number,
-        "recsuffix": suffix,
-    }
-    return _fetch_results(params)
+def search_by_recording(rec_number):
+    """Search by recording number. Goes to detail page directly."""
+    url = f"{BASE_URL}/GetRecDataDetail.aspx?rec={rec_number}"
+    html = _fetch_url(url)
+    if not html:
+        return []
+    # Parse the detail page
+    result = _parse_detail_page(html)
+    return [result] if result else []
 
 
-def _fetch_results(params):
-    """Fetch search results from the recorder website."""
-    if HAS_SCRAPLING:
-        return _fetch_with_scrapling(params)
-    return _fetch_with_urllib(params)
-
-
-def _fetch_with_urllib(params):
-    """Fallback: fetch with urllib and parse HTML manually."""
-    url = f"{BASE_URL}/GetRecDataRslts.aspx?{urllib.parse.urlencode(params)}"
+def _fetch_url(url):
+    """Fetch a URL and return HTML content."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept": "text/html,application/xhtml+xml",
@@ -140,46 +157,27 @@ def _fetch_with_urllib(params):
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+            return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         print(f"HTTP {e.code}: {e.reason}", file=sys.stderr)
-        return []
+        return None
     except urllib.error.URLError as e:
         print(f"Connection error: {e.reason}", file=sys.stderr)
-        return []
+        return None
 
+
+def _fetch_results(params):
+    """Fetch search results from the recorder website."""
+    url = f"{BASE_URL}/GetRecDataPaging.aspx?{urllib.parse.urlencode(params)}"
+    html = _fetch_url(url)
+    if not html:
+        return []
     return _parse_html_results(html)
 
 
-def _fetch_with_scrapling(params):
-    """Fetch with scrapling for better anti-bot handling."""
-    url = f"{BASE_URL}/GetRecDataRslts.aspx?{urllib.parse.urlencode(params)}"
-    fetcher = Fetcher()
-    try:
-        page = fetcher.get(url)
-    except Exception as e:
-        print(f"Scrapling error: {e}", file=sys.stderr)
-        return _fetch_with_urllib(params)
-
-    if page.status != 200:
-        print(f"HTTP {page.status}", file=sys.stderr)
-        return []
-
-    results = []
-    rows = page.find_all("tr")
-    for row in rows:
-        cells = row.find_all("td")
-        if len(cells) >= 5:
-            result = _extract_row_data(cells)
-            if result:
-                results.append(result)
-    return results
-
-
 def _parse_html_results(html):
-    """Parse HTML table results with regex (no BeautifulSoup needed)."""
+    """Parse HTML table results with regex."""
     results = []
-    # Find table rows
     row_pattern = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL | re.IGNORECASE)
     cell_pattern = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL | re.IGNORECASE)
     tag_strip = re.compile(r'<[^>]+>')
@@ -187,40 +185,55 @@ def _parse_html_results(html):
     for row_match in row_pattern.finditer(html):
         row_html = row_match.group(1)
         cells = cell_pattern.findall(row_html)
-        if len(cells) >= 5:
-            clean_cells = [tag_strip.sub("", c).strip() for c in cells]
+        if len(cells) >= 4:
+            clean = [tag_strip.sub("", c).strip() for c in cells]
             # Skip header rows
-            if clean_cells[0].lower() in ("recording number", "rec number", ""):
+            if clean[0].lower() in ("name", "recording number", "rec number", ""):
                 continue
+            # Columns: Name, Recording Number, Recording Date, Document Code, Docket/Book, Page/Map
             result = {
-                "recording_number": clean_cells[0] if len(clean_cells) > 0 else "",
-                "recording_date": clean_cells[1] if len(clean_cells) > 1 else "",
-                "doc_type": clean_cells[2] if len(clean_cells) > 2 else "",
-                "parties": clean_cells[3] if len(clean_cells) > 3 else "",
+                "name": clean[0] if len(clean) > 0 else "",
+                "recording_number": clean[1] if len(clean) > 1 else "",
+                "recording_date": clean[2] if len(clean) > 2 else "",
+                "doc_type": clean[3] if len(clean) > 3 else "",
             }
-            # Only include non-empty results
+            if len(clean) > 4:
+                result["docket_book"] = clean[4]
+            if len(clean) > 5:
+                result["page_map"] = clean[5]
             if result["recording_number"] and result["recording_number"] != "&nbsp;":
                 results.append(result)
     return results
 
 
-def _extract_row_data(cells):
-    """Extract document data from a table row's cells."""
-    try:
-        texts = [c.text.strip() if hasattr(c, 'text') else str(c).strip() for c in cells]
-        if not texts[0] or texts[0].lower() in ("recording number", "rec number"):
-            return None
-        result = {
-            "recording_number": texts[0],
-            "recording_date": texts[1] if len(texts) > 1 else "",
-            "doc_type": texts[2] if len(texts) > 2 else "",
-            "parties": texts[3] if len(texts) > 3 else "",
-        }
-        if len(texts) > 4:
-            result["additional"] = texts[4]
-        return result
-    except (IndexError, AttributeError):
+def _parse_detail_page(html):
+    """Parse a recording detail page."""
+    tag_strip = re.compile(r'<[^>]+>')
+    # Try to extract key fields from the detail page
+    fields = {}
+    # Look for table rows with label: value pattern
+    row_pattern = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL | re.IGNORECASE)
+    cell_pattern = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL | re.IGNORECASE)
+
+    for row_match in row_pattern.finditer(html):
+        row_html = row_match.group(1)
+        cells = cell_pattern.findall(row_html)
+        if len(cells) >= 2:
+            label = tag_strip.sub("", cells[0]).strip().rstrip(":")
+            value = tag_strip.sub("", cells[1]).strip()
+            if label and value:
+                fields[label] = value
+
+    if not fields:
         return None
+
+    return {
+        "recording_number": fields.get("Recording Number", fields.get("Rec Number", "")),
+        "recording_date": fields.get("Recording Date", fields.get("Rec Date", "")),
+        "doc_type": fields.get("Document Code", fields.get("Doc Code", "")),
+        "name": fields.get("Name", ""),
+        "details": fields,
+    }
 
 
 def print_results(results, fmt="summary"):
@@ -241,13 +254,16 @@ def print_results(results, fmt="summary"):
         rec_num = doc.get("recording_number", "")
         rec_date = doc.get("recording_date", "")
         doc_type = doc.get("doc_type", "")
-        parties = doc.get("parties", "")
-        type_name = DOC_TYPES.get(doc_type, doc_type)
+        name = doc.get("name", "")
+        book = doc.get("docket_book", "")
+        page = doc.get("page_map", "")
 
         print(f"  {i}. {rec_num}  ({rec_date})")
-        print(f"     Type: {type_name}")
-        if parties:
-            print(f"     Parties: {parties}")
+        print(f"     Type: {doc_type}")
+        if name:
+            print(f"     Name: {name}")
+        if book or page:
+            print(f"     Book/Page: {book}/{page}")
         print()
 
 
@@ -263,7 +279,7 @@ def main():
     name_p.add_argument("--middle", default="")
     name_p.add_argument("--from", dest="date_from", help="Start date (YYYY-MM-DD)")
     name_p.add_argument("--to", dest="date_to", help="End date (YYYY-MM-DD)")
-    name_p.add_argument("--doctype", default="", help="Document type code (DEED, MTG, LIEN, etc.)")
+    name_p.add_argument("--doctype", default="", help="Document type code")
     name_p.add_argument("--format", choices=["json", "summary"], default="summary")
 
     # Business search
@@ -276,13 +292,11 @@ def main():
 
     # Recording number search
     rec_p = subparsers.add_parser("recording", help="Search by recording number")
-    rec_p.add_argument("year", help="Recording year (e.g. 2024)")
-    rec_p.add_argument("number", help="Recording sequence number")
-    rec_p.add_argument("--suffix", default="")
+    rec_p.add_argument("number", help="Full recording number (e.g. 20240715342)")
     rec_p.add_argument("--format", choices=["json", "summary"], default="summary")
 
     # Document types reference
-    types_p = subparsers.add_parser("types", help="List common document type codes")
+    subparsers.add_parser("types", help="List common document type codes")
 
     args = parser.parse_args()
 
@@ -290,7 +304,7 @@ def main():
         print("\nCommon Document Type Codes:")
         print("-" * 50)
         for code, name in sorted(DOC_TYPES.items()):
-            print(f"  {code:10s}  {name}")
+            print(f"  {code:12s}  {name}")
         return
 
     if args.command == "name":
@@ -303,7 +317,7 @@ def main():
             args.name, args.date_from, args.date_to, args.doctype
         )
     elif args.command == "recording":
-        results = search_by_recording(args.year, args.number, args.suffix)
+        results = search_by_recording(args.number)
     else:
         parser.print_help()
         return
