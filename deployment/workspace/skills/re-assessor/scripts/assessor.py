@@ -54,6 +54,20 @@ import urllib.request
 import urllib.error
 import urllib.parse
 
+def _setup_ssl():
+    """Ensure SSL cert bundle is found on macOS (Homebrew Python often missing default)."""
+    try:
+        import certifi
+        ca = certifi.where()
+    except ImportError:
+        ca = "/etc/ssl/cert.pem"
+    os.environ.setdefault("SSL_CERT_FILE", ca)
+    import ssl
+    if not os.path.exists(ssl.get_default_verify_paths().cafile or ""):
+        ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=ca)
+
+_setup_ssl()
+
 BASE_URL = "https://mcassessor.maricopa.gov"
 
 def get_token():
