@@ -25,15 +25,21 @@ const service = {
 };
 
 const runServiceRestart = vi.fn();
+const runServiceStop = vi.fn();
 const waitForGatewayHealthyRestart = vi.fn();
 const terminateStaleGatewayPids = vi.fn();
 const renderRestartDiagnostics = vi.fn(() => ["diag: unhealthy runtime"]);
 const resolveGatewayPort = vi.fn(() => 18789);
+const findGatewayPidsOnPortSync = vi.fn<(port: number) => number[]>(() => []);
 const loadConfig = vi.fn(() => ({}));
 
 vi.mock("../../config/config.js", () => ({
   loadConfig: () => loadConfig(),
   resolveGatewayPort,
+}));
+
+vi.mock("../../infra/restart.js", () => ({
+  findGatewayPidsOnPortSync: (port: number) => findGatewayPidsOnPortSync(port),
 }));
 
 vi.mock("../../daemon/service.js", () => ({
@@ -51,25 +57,28 @@ vi.mock("./restart-health.js", () => ({
 vi.mock("./lifecycle-core.js", () => ({
   runServiceRestart,
   runServiceStart: vi.fn(),
-  runServiceStop: vi.fn(),
+  runServiceStop,
   runServiceUninstall: vi.fn(),
 }));
 
 describe("runDaemonRestart health checks", () => {
   let runDaemonRestart: (opts?: { json?: boolean }) => Promise<boolean>;
+  let runDaemonStop: (opts?: { json?: boolean }) => Promise<void>;
 
   beforeAll(async () => {
-    ({ runDaemonRestart } = await import("./lifecycle.js"));
+    ({ runDaemonRestart, runDaemonStop } = await import("./lifecycle.js"));
   });
 
   beforeEach(() => {
     service.readCommand.mockClear();
     service.restart.mockClear();
     runServiceRestart.mockClear();
+    runServiceStop.mockClear();
     waitForGatewayHealthyRestart.mockClear();
     terminateStaleGatewayPids.mockClear();
     renderRestartDiagnostics.mockClear();
     resolveGatewayPort.mockClear();
+    findGatewayPidsOnPortSync.mockClear();
     loadConfig.mockClear();
 
     service.readCommand.mockResolvedValue({
@@ -91,6 +100,7 @@ describe("runDaemonRestart health checks", () => {
       });
       return true;
     });
+    runServiceStop.mockResolvedValue(undefined);
   });
 
   it("kills stale gateway pids and retries restart", async () => {
@@ -132,5 +142,49 @@ describe("runDaemonRestart health checks", () => {
     });
     expect(terminateStaleGatewayPids).not.toHaveBeenCalled();
     expect(renderRestartDiagnostics).toHaveBeenCalledTimes(1);
+  });
+
+  it("signals an unmanaged gateway process on stop", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    findGatewayPidsOnPortSync.mockReturnValue([4200, 4200, 4300]);
+    runServiceStop.mockImplementation(async (params: { onNotLoaded?: () => Promise<unknown> }) => {
+      await params.onNotLoaded?.();
+    });
+
+    await runDaemonStop({ json: true });
+
+    expect(findGatewayPidsOnPortSync).toHaveBeenCalledWith(18789);
+    expect(killSpy).toHaveBeenCalledWith(4200, "SIGTERM");
+    expect(killSpy).toHaveBeenCalledWith(4300, "SIGTERM");
+  });
+
+  it("signals a single unmanaged gateway process on restart", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    findGatewayPidsOnPortSync.mockReturnValue([4200]);
+    runServiceRestart.mockImplementation(
+      async (params: RestartParams & { onNotLoaded?: () => Promise<unknown> }) => {
+        await params.onNotLoaded?.();
+        return true;
+      },
+    );
+
+    await runDaemonRestart({ json: true });
+
+    expect(findGatewayPidsOnPortSync).toHaveBeenCalledWith(18789);
+    expect(killSpy).toHaveBeenCalledWith(4200, "SIGUSR1");
+  });
+
+  it("fails unmanaged restart when multiple gateway listeners are present", async () => {
+    findGatewayPidsOnPortSync.mockReturnValue([4200, 4300]);
+    runServiceRestart.mockImplementation(
+      async (params: RestartParams & { onNotLoaded?: () => Promise<unknown> }) => {
+        await params.onNotLoaded?.();
+        return true;
+      },
+    );
+
+    await expect(runDaemonRestart({ json: true })).rejects.toThrow(
+      "multiple gateway processes are listening on port 18789",
+    );
   });
 });
