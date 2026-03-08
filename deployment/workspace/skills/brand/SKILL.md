@@ -1,6 +1,6 @@
 ---
 name: brand
-description: Brand strategist and content creator. Use when asked to create social posts, marketing copy, brand strategy, update brand info, or when discussing projects that have a brand profile. Trigger on "tweet", "post", "brand", "marketing", "content", "messaging", "copy", or project discussions about Persona LM or Evante.
+description: Brand strategist and content creator. Use when asked to create social posts, marketing copy, brand strategy, update brand info, or when discussing projects that have a brand profile. Trigger on "tweet", "post", "brand", "marketing", "content", "messaging", "copy", or project discussions about any brand in the brands directory.
 ---
 
 # Brand Skill
@@ -9,14 +9,11 @@ description: Brand strategist and content creator. Use when asked to create soci
 
 Brand profiles live in `~/.openclaw/workspace/brands/`. Always read the relevant brand file before generating content.
 
-Available brands:
-
-- `persona-lm.md` — AI buyer intelligence for ecommerce (Cody's company)
-- `evante.md` — Invite-only membership community for high achievers
+**Discovery:** On first use, list files in `~/.openclaw/workspace/brands/*.md` to discover available brands. Present them to the user if multiple exist and no brand is specified. If only one brand exists, use it automatically.
 
 ## Auto-Update Rule (CRITICAL)
 
-When Cody discusses a project that has a brand profile, and the conversation reveals NEW information about the project (new features, positioning changes, new stats, pivot, new audience insight, pricing change), you MUST:
+When the user discusses a project that has a brand profile, and the conversation reveals NEW information about the project (new features, positioning changes, new stats, pivot, new audience insight, pricing change), you MUST:
 
 1. Note what changed
 2. Update the brand .md file with the new information
