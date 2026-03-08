@@ -115,6 +115,38 @@ Use absolute path for reliability:
 
 - `/Users/admin/bin/mail ...`
 
+## Google Workspace CLI (gwcli)
+
+Install: `npm install -g google-workspace-cli` (provides `gwcli` command)
+
+Gmail, Calendar, and Drive access via OAuth. Multi-profile support.
+
+```bash
+# Gmail
+gwcli gmail list --unread --format json
+gwcli gmail search "from:person@example.com" --format json
+gwcli gmail read <message-id> --format json
+gwcli gmail reply <message-id> --body "Response"
+gwcli gmail send --to user@example.com --subject "Subject" --body "Body"
+
+# Calendar
+gwcli calendar events --days 7 --format json
+gwcli calendar create "Meeting" --start "2026-03-10 10:00" --end "2026-03-10 11:00"
+gwcli calendar update <event-id> --title "New Title"
+gwcli calendar delete <event-id>
+
+# Drive
+gwcli drive list --format json
+gwcli drive search "name contains 'report'" --format json
+gwcli drive download <file-id> --output ~/Downloads/file.pdf
+gwcli drive export <doc-id> --format pdf
+```
+
+Config: `~/.config/gwcli/` — profiles stored under `profiles/<name>/`.
+Always use `--format json` for structured output. Use `--profile <name>` for multi-account.
+
+See skills: `gwcli-gmail`, `gwcli-calendar`, `gwcli-drive` for full command reference.
+
 ## OTP Tool (Redis-backed)
 
 Path: `~/.openclaw/workspace/mcp_servers/otp_server.py`
