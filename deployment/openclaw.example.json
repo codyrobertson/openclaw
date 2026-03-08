@@ -1,0 +1,183 @@
+{
+  "logging": {
+    "level": "debug"
+  },
+  "auth": {
+    "profiles": {
+      "openrouter:default": {
+        "provider": "openrouter",
+        "mode": "api_key"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/google/gemini-2.5-flash"
+      },
+      "models": {
+        "openrouter/auto": {
+          "alias": "OpenRouter"
+        },
+        "openrouter/google/gemini-2.5-flash": {}
+      },
+      "workspace": "/Users/admin/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8,
+        "maxSpawnDepth": 2,
+        "maxChildrenPerAgent": 5,
+        "runTimeoutSeconds": 600,
+        "archiveAfterMinutes": 120
+      }
+    }
+  },
+  "tools": {
+    "deny": ["web_search"],
+    "media": {
+      "audio": {
+        "timeoutSeconds": 30,
+        "models": [
+          {
+            "provider": "groq",
+            "model": "whisper-large-v3-turbo"
+          }
+        ]
+      }
+    },
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off",
+      "pathPrepend": [
+        "/Users/admin/bin",
+        "/Users/admin/code_projects/.venv/bin",
+        "/Users/admin/.volta/bin",
+        "/Users/admin/.volta/tools/image/node/22.22.0/bin"
+      ]
+    }
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions",
+    "responsePrefix": "[{model}]"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "boot-md": {
+          "enabled": true
+        },
+        "bootstrap-extra-files": {
+          "enabled": true
+        },
+        "command-logger": {
+          "enabled": true
+        },
+        "session-memory": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "botToken": "<YOUR_TELEGRAM_BOT_TOKEN>",
+      "groupPolicy": "open",
+      "streaming": "off"
+    },
+    "discord": {
+      "enabled": true,
+      "token": "<YOUR_DISCORD_BOT_TOKEN>",
+      "groupPolicy": "open",
+      "streaming": "off",
+      "dmPolicy": "open",
+      "allowFrom": ["*"],
+      "guilds": {
+        "<YOUR_GUILD_ID>": {
+          "requireMention": false,
+          "channels": {
+            "*": {
+              "requireMention": false
+            }
+          }
+        }
+      },
+      "execApprovals": {
+        "enabled": false,
+        "approvers": []
+      },
+      "threadBindings": {
+        "enabled": true,
+        "idleHours": 24,
+        "spawnSubagentSessions": true
+      },
+      "voice": {
+        "enabled": false,
+        "autoJoin": [
+          {
+            "guildId": "<YOUR_GUILD_ID>",
+            "channelId": "<YOUR_VOICE_CHANNEL_ID>"
+          }
+        ],
+        "tts": {
+          "auto": "always",
+          "mode": "final",
+          "provider": "edge",
+          "edge": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "<YOUR_GATEWAY_TOKEN>"
+    },
+    "tailscale": {
+      "mode": "serve",
+      "resetOnExit": false
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "calendar.add",
+        "contacts.add",
+        "reminders.add"
+      ]
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "bun"
+    }
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {
+        "enabled": true
+      },
+      "discord": {
+        "enabled": true
+      }
+    }
+  }
+}
