@@ -1,6 +1,6 @@
 import type { SecretInput } from "./types.secrets.js";
 
-export type TtsProvider = "elevenlabs" | "openai" | "edge";
+export type TtsProvider = "elevenlabs" | "openai" | "edge" | "fish";
 
 export type TtsMode = "final" | "all";
 
@@ -75,6 +75,23 @@ export type TtsConfig = {
     saveSubtitles?: boolean;
     proxy?: string;
     timeoutMs?: number;
+  };
+  /** Fish Audio configuration. */
+  fish?: {
+    apiKey?: SecretInput;
+    baseUrl?: string;
+    /** Model: "s1" or "s2-pro" (recommended). */
+    model?: string;
+    /** Voice reference ID from Fish Audio library. */
+    voice?: string;
+    /** Temperature for sampling diversity (0-1). */
+    temperature?: number;
+    /** Top-p nucleus sampling (0-1). */
+    topP?: number;
+    /** Prosody speed multiplier (0.5-2.0). */
+    speed?: number;
+    /** Latency mode: "low", "normal", or "balanced". */
+    latency?: string;
   };
   /** Optional path for local TTS user preferences JSON. */
   prefsPath?: string;

@@ -151,7 +151,12 @@ export function parseTtsDirectives(
             if (!policy.allowProvider) {
               break;
             }
-            if (rawValue === "openai" || rawValue === "elevenlabs" || rawValue === "edge") {
+            if (
+              rawValue === "openai" ||
+              rawValue === "elevenlabs" ||
+              rawValue === "edge" ||
+              rawValue === "fish"
+            ) {
               overrides.provider = rawValue;
             } else {
               warnings.push(`unsupported provider "${rawValue}"`);
@@ -652,6 +657,64 @@ export async function openaiTTS(params: {
 
     if (!response.ok) {
       throw new Error(`OpenAI TTS API error (${response.status})`);
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function fishAudioTTS(params: {
+  text: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  voice?: string;
+  responseFormat: "mp3" | "opus" | "wav" | "pcm";
+  temperature?: number;
+  topP?: number;
+  speed?: number;
+  latency?: string;
+  timeoutMs: number;
+}): Promise<Buffer> {
+  const { text, apiKey, baseUrl, model, voice, responseFormat, timeoutMs } = params;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const body: Record<string, unknown> = {
+      text,
+      format: responseFormat,
+      latency: params.latency ?? "normal",
+    };
+    if (voice) {
+      body.reference_id = voice;
+    }
+    if (params.temperature != null) {
+      body.temperature = params.temperature;
+    }
+    if (params.topP != null) {
+      body.top_p = params.topP;
+    }
+    if (params.speed != null && params.speed !== 1) {
+      body.prosody = { speed: params.speed };
+    }
+
+    const response = await fetch(`${baseUrl}/v1/tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        model,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Fish Audio API error (${response.status})`);
     }
 
     return Buffer.from(await response.arrayBuffer());

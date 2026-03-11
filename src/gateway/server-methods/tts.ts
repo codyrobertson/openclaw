@@ -38,6 +38,7 @@ export const ttsHandlers: GatewayRequestHandlers = {
         prefsPath,
         hasOpenAIKey: Boolean(resolveTtsApiKey(config, "openai")),
         hasElevenLabsKey: Boolean(resolveTtsApiKey(config, "elevenlabs")),
+        hasFishKey: Boolean(resolveTtsApiKey(config, "fish")),
         edgeEnabled: isTtsProviderConfigured(config, "edge"),
       });
     } catch (err) {

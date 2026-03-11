@@ -31,6 +31,7 @@ import {
   DEFAULT_OPENAI_BASE_URL,
   edgeTTS,
   elevenLabsTTS,
+  fishAudioTTS,
   inferEdgeExtension,
   isValidOpenAIModel,
   isValidOpenAIVoice,
@@ -57,6 +58,8 @@ const DEFAULT_OPENAI_VOICE = "alloy";
 const DEFAULT_EDGE_VOICE = "en-US-MichelleNeural";
 const DEFAULT_EDGE_LANG = "en-US";
 const DEFAULT_EDGE_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3";
+const DEFAULT_FISH_BASE_URL = "https://api.fish.audio";
+const DEFAULT_FISH_MODEL = "s2-pro";
 
 const DEFAULT_ELEVENLABS_VOICE_SETTINGS = {
   stability: 0.5,
@@ -85,6 +88,7 @@ const DEFAULT_OUTPUT = {
 const TELEPHONY_OUTPUT = {
   openai: { format: "pcm" as const, sampleRate: 24000 },
   elevenlabs: { format: "pcm_22050", sampleRate: 22050 },
+  fish: { format: "pcm" as const, sampleRate: 24000 },
 };
 
 const TTS_AUTO_MODES = new Set<TtsAutoMode>(["off", "always", "inbound", "tagged"]);
@@ -130,6 +134,16 @@ export type ResolvedTtsConfig = {
     saveSubtitles: boolean;
     proxy?: string;
     timeoutMs?: number;
+  };
+  fish: {
+    apiKey?: string;
+    baseUrl: string;
+    model: string;
+    voice?: string;
+    temperature?: number;
+    topP?: number;
+    speed?: number;
+    latency?: string;
   };
   prefsPath?: string;
   maxTextLength: number;
@@ -318,6 +332,19 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
       proxy: raw.edge?.proxy?.trim() || undefined,
       timeoutMs: raw.edge?.timeoutMs,
     },
+    fish: {
+      apiKey: normalizeResolvedSecretInputString({
+        value: raw.fish?.apiKey,
+        path: "messages.tts.fish.apiKey",
+      }),
+      baseUrl: (raw.fish?.baseUrl?.trim() || DEFAULT_FISH_BASE_URL).replace(/\/+$/, ""),
+      model: raw.fish?.model?.trim() || DEFAULT_FISH_MODEL,
+      voice: raw.fish?.voice?.trim() || undefined,
+      temperature: raw.fish?.temperature,
+      topP: raw.fish?.topP,
+      speed: raw.fish?.speed,
+      latency: raw.fish?.latency?.trim() || undefined,
+    },
     prefsPath: raw.prefsPath,
     maxTextLength: raw.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
     timeoutMs: raw.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -456,6 +483,9 @@ export function getTtsProvider(config: ResolvedTtsConfig, prefsPath: string): Tt
   if (resolveTtsApiKey(config, "elevenlabs")) {
     return "elevenlabs";
   }
+  if (resolveTtsApiKey(config, "fish")) {
+    return "fish";
+  }
   return "edge";
 }
 
@@ -523,10 +553,13 @@ export function resolveTtsApiKey(
   if (provider === "openai") {
     return config.openai.apiKey || process.env.OPENAI_API_KEY;
   }
+  if (provider === "fish") {
+    return config.fish.apiKey || process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY;
+  }
   return undefined;
 }
 
-export const TTS_PROVIDERS = ["openai", "elevenlabs", "edge"] as const;
+export const TTS_PROVIDERS = ["openai", "elevenlabs", "fish", "edge"] as const;
 
 export function resolveTtsProviderOrder(primary: TtsProvider): TtsProvider[] {
   return [primary, ...TTS_PROVIDERS.filter((provider) => provider !== primary)];
@@ -660,7 +693,22 @@ export async function textToSpeech(params: {
       }
 
       let audioBuffer: Buffer;
-      if (provider === "elevenlabs") {
+      if (provider === "fish") {
+        const fishFormat: "mp3" | "opus" = output.voiceCompatible ? "opus" : "mp3";
+        audioBuffer = await fishAudioTTS({
+          text: params.text,
+          apiKey,
+          baseUrl: config.fish.baseUrl,
+          model: config.fish.model,
+          voice: config.fish.voice,
+          responseFormat: fishFormat,
+          temperature: config.fish.temperature,
+          topP: config.fish.topP,
+          speed: config.fish.speed,
+          latency: config.fish.latency,
+          timeoutMs: config.timeoutMs,
+        });
+      } else if (provider === "elevenlabs") {
         const voiceIdOverride = params.overrides?.elevenlabs?.voiceId;
         const modelIdOverride = params.overrides?.elevenlabs?.modelId;
         const voiceSettings = {
@@ -711,7 +759,14 @@ export async function textToSpeech(params: {
         audioPath,
         latencyMs,
         provider,
-        outputFormat: provider === "openai" ? output.openai : output.elevenlabs,
+        outputFormat:
+          provider === "openai"
+            ? output.openai
+            : provider === "fish"
+              ? output.voiceCompatible
+                ? "opus"
+                : "mp3"
+              : output.elevenlabs,
         voiceCompatible: output.voiceCompatible,
       };
     } catch (err) {
@@ -754,6 +809,32 @@ export async function textToSpeechTelephony(params: {
       if (!apiKey) {
         errors.push(`${provider}: no API key`);
         continue;
+      }
+
+      if (provider === "fish") {
+        const output = TELEPHONY_OUTPUT.fish;
+        const audioBuffer = await fishAudioTTS({
+          text: params.text,
+          apiKey,
+          baseUrl: config.fish.baseUrl,
+          model: config.fish.model,
+          voice: config.fish.voice,
+          responseFormat: output.format,
+          temperature: config.fish.temperature,
+          topP: config.fish.topP,
+          speed: config.fish.speed,
+          latency: "low",
+          timeoutMs: config.timeoutMs,
+        });
+
+        return {
+          success: true,
+          audioBuffer,
+          latencyMs: Date.now() - providerStart,
+          provider,
+          outputFormat: output.format,
+          sampleRate: output.sampleRate,
+        };
       }
 
       if (provider === "elevenlabs") {
